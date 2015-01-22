@@ -40,26 +40,31 @@
   </div>
 
   <script src="js/d3.min.js"></script>
-  <script src="js/underscore.min.js"></script>
+  <script src="js/async.js"></script>
 
   <script>
-    var baseURL = (window.location.hostname === "localhost") ? "http://localhost:5000" : "http://dev.macrostrat.org",
+    var baseURL = (window.location.hostname === "localhost") ? "http://localhost:5000" : "http://" + window.location.hostname,
 
-        height = 800,
-        width = 200,
+        height = 900,
+        width = 250,
         currentX = 0;
 
+    // Used to size each interval properly
+  // Domain max COULD be dynamic if we really wanted...
     var scale = d3.scale.linear()
         .domain([0, 4000])
         .range([0, height]);
 
-    var interval_lookup = {
+    /* For the aggregate "international" timescale
+          Not currently in use... */
+    /*var interval_lookup = {
         "era": 0,
         "period": width * 0.25,
         "epoch": width * 0.5,
         "age": width * 0.75
-      }
+      }*/
 
+    // For the drag show
     var dragStart, transformStart,
       newY = 0.01;
 
@@ -92,35 +97,80 @@
       d3.json(baseURL + "/api/defs/timescales?all", function(error, data) {
         var timescales = data.success.data;
 
-        timescales.forEach(function(scale) {
-          getTimescale(scale);
+        // Pull out international periods, ages, and epochs, but ignore aggregate international
+        var internationals = timescales.filter(function(d) {
+          if (d.timescale.indexOf("international") > -1 && d.timescale !== "international") {
+            return d;
+          }
         });
 
-      });
-    }
-
-    function getTimescale(scale) {
-      d3.json(baseURL + "/api/defs/intervals?timescale=" + scale.timescale, function(error, data) {
-        data.success.data.forEach(function(d) {
-          d.scale = scale.timescale;
-          d.scale_id = scale.id
+        // Remove all internationals from the list of timescales
+        timescales = timescales.filter(function(d) {
+          if (d.timescale.indexOf("international") < 0) {
+            return d;
+          }
         });
-        drawTimescale(scale, data.success.data);
+
+        var lookup = {
+          "eons": -1,
+          "eras": 0,
+          "periods": 1,
+          "epochs": 2,
+          "ages": 3
+        }
+
+        // Assign some ranking to each international scale so we know which order to draw them in
+        internationals.forEach(function(d) {
+          d.order = lookup[d.timescale.replace("international ", "")];
+        });
+
+        // ... And then sort them by that ranking
+        internationals = internationals.sort(function(a, b) { return b.order - a.order });
+
+        // Prepend the internationals to the timescale list so that they draw first
+        internationals.forEach(function(d) {
+          timescales.unshift(d);
+        });
+
+        // For each timescale (synchronously!!!)
+    /* NB: If this is done asynchronously, the timescales will not draw in the order we want */
+        async.eachLimit(timescales, 1, function(scale, callback) {
+
+          async.waterfall([
+            // First request the timescale data from the API
+            function(callback2) {
+              d3.json(baseURL + "/api/defs/intervals?timescale=" + scale.timescale, function(error, data) {
+                data.success.data.forEach(function(d) {
+                  d.scale = scale.timescale;
+                  d.scale_id = scale.id
+                });
+                callback2(null, scale, data.success.data)
+              });
+            },
+
+            // Second, draw the timescale
+            function(scale, intervals, callback2) {
+              drawTimescale(scale, intervals);
+              callback2(null);
+            }
+
+          // Once the data for a timescale has been requested and drawn, move on to the next
+          ], function(error, done) {
+            callback();
+          });
+        }, function(err) {
+          console.log("Done drawing");
+        });
+
       });
     }
 
     function drawTimescale(tscale, data) {
       
-      var uniqueRanks = _.uniq(data, function(interval) { 
-        return interval.type; 
-      }).map(function(d) {
-        return d.type;
-      });
-
       var g = d3.select("#timescaleContainer")
           .append("g")
             .attr("class", "timescale")
-            .attr("id", tscale)
+            .attr("id", tscale.timescale)
             .attr("transform", "translate(" + currentX + ",0)")
             .attr("data-zoomed", "false");
 
@@ -165,12 +215,15 @@
         })
         .append("title").text(function(d) { return d.name + " - " + d.id + " (" + d.scale + ")"  });
       
-      currentX += (width/4);
+      // This keeps track of where the next timescale should be positioned
+      currentX += (tscale.timescale === "international ages") ? (width/4) + 10 : (width/4) ;
       
       setTimeout(adjust.labels.timescale, 1);
 
     }
 
+
+/* Zoom and adjust code reused from the column renderer, thus the weird format */
     var zoom = {
       go: function(d) {
           
@@ -194,8 +247,6 @@
 
           zoom.inn.go(scaleY, translate);
         }
-
-
       },
       
       inn: {
@@ -278,7 +329,6 @@
 
 
     var adjust = {
-
       labels: {
         timescale: function() {
           d3.selectAll(".interval_label")
@@ -299,6 +349,7 @@
       }
     }
 
+    // Start the party
     start();
 
   </script>
