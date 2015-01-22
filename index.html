@@ -267,6 +267,11 @@
               return "translate(" + (x + ((width * 0.3)/2)) + "," + ((scale(d.late_age) + scale(d.early_age))/2) + ")rotate(-90)"; 
             })
             .each("end", function() { if (!--n) { adjust.labels.timescale() }});
+
+          d3.selectAll(".timescale").attr("transform", function(d) {
+            var x = d3.transform(d3.select(this).attr("transform")).translate;
+            return "translate(" + x[0] + ", 0)";
+          });
         }
       }
     }
