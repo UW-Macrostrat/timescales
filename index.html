@@ -146,7 +146,7 @@
           if (d3.event.defaultPrevented) return;
           zoom.go(d);
         })
-        .append("title").text(function(d) { return d.name + " (" + d.scale + ")" });
+        .append("title").text(function(d) { return d.name + " - " + d.id + " (" + d.scale + ")" });
 
       g.selectAll(".label")
         .data(data)
@@ -163,9 +163,10 @@
           if (d3.event.defaultPrevented) return;
           zoom.go(d);
         })
-        .append("title").text(function(d) { return d.name + " (" + d.scale + ")" });
+        .append("title").text(function(d) { return d.name + " - " + d.id + " (" + d.scale + ")"  });
       
       currentX += (width/4);
+      
       adjust.labels.timescale();
 
     }
