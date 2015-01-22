@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8">
+  <title>Macrostrat timescales</title>
+  <style>
+
+  .node {
+    fill: #ddd;
+    fill-opacity: 1;
+    stroke: #000;
+    stroke-width: 0.01em;
+  }
+
+  .label {
+    font: 10px sans-serif;
+    text-anchor: middle;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    cursor: default;
+  }
+
+  #timescales{
+    display: inline;
+  }
+
+  #timescaleContainer {
+    height: 800px;
+    width: 900px;
+  }
+
+  </style>
+</head>
+<body>
+  <div id="timescales">
+    <svg id="timescaleContainer"></svg>
+  </div>
+
+  <script src="js/d3.min.js"></script>
+  <script src="js/underscore.min.js"></script>
+
+  <script>
+    var baseURL = (window.location.hostname === "localhost") ? "http://localhost:5000" : "http://dev.macrostrat.org",
+
+        height = 800,
+        width = 200,
+        currentX = 0;
+
+    var scale = d3.scale.linear()
+        .domain([0, 4000])
+        .range([0, height]);
+
+    var interval_lookup = {
+        "era": 0,
+        "period": width * 0.25,
+        "epoch": width * 0.5,
+        "age": width * 0.75
+      }
+
+    var dragStart, transformStart,
+      newY = 0.01;
+
+    var drag = d3.behavior.drag()
+      .origin(function() { 
+        var t = d3.select("#timescaleContainer g");
+        return {x: 0, y: -newY};
+      })
+      .on("dragstart", function() {
+        dragStart = [d3.event.sourceEvent.pageX, d3.event.sourceEvent.pageY];
+        transformStart = d3.transform(d3.selectAll(".timescale").attr("transform")).translate;
+
+        d3.event.sourceEvent.stopPropagation();
+      })
+      .on("drag", function() {
+        var currentDrag = [d3.event.sourceEvent.pageX, d3.event.sourceEvent.pageY];
+        newY = (dragStart[1] - currentDrag[1]);
+
+        d3.selectAll(".timescale")
+          .attr("transform", function() {
+            var x = d3.transform(d3.select(this).attr("transform")).translate;
+
+            return "translate(" + [ x[0], parseInt(transformStart[1] + -newY) ] + ")";
+          });
+
+      });
+
+
+    function start() {
+      d3.json(baseURL + "/api/defs/timescales?all", function(error, data) {
+        var timescales = data.success.data;
+
+        timescales.forEach(function(scale) {
+          getTimescale(scale);
+        });
+
+      });
+    }
+
+    function getTimescale(scale) {
+      d3.json(baseURL + "/api/defs/intervals?timescale=" + scale.timescale, function(error, data) {
+        data.success.data.forEach(function(d) {
+          d.scale = scale.timescale;
+          d.scale_id = scale.id
+        });
+        drawTimescale(scale, data.success.data);
+      });
+    }
+
+    function drawTimescale(tscale, data) {
+      
+      var uniqueRanks = _.uniq(data, function(interval) { 
+        return interval.type; 
+      }).map(function(d) {
+        return d.type;
+      });
+
+      var g = d3.select("#timescaleContainer")
+          .append("g")
+            .attr("class", "timescale")
+            .attr("id", tscale)
+            .attr("transform", "translate(" + currentX + ",0)")
+            .attr("data-zoomed", "false");
+
+      g.selectAll(".node")
+        .data(data)
+      .enter().append("rect")
+        .attr("class", "node interval_node")
+        .attr("id", function(d) { return "n" + String(d.scale_id) + String(d.id) })
+        .attr("x", function(d) { 
+          if (d.scale !== "international") {
+            return 0;
+          } else {
+            return interval_lookup[d.type] 
+          }
+          
+        })
+        .attr("y", function(d) { return scale(d.late_age) })
+        .attr("width", width/4)
+        .attr("height", function(d) { return scale(d.early_age) - scale(d.late_age)})
+        .style("fill", function(d) { return d.color })
+        .call(drag)
+        .on("click", function(d) {
+          if (d3.event.defaultPrevented) return;
+          zoom.go(d);
+        })
+        .append("title").text(function(d) { return d.name + " (" + d.scale + ")" });
+
+      g.selectAll(".label")
+        .data(data)
+      .enter().append("text")
+        .attr("class", "label interval_label")
+        .attr("id", function(d) { return "nl" + String(d.scale_id) + String(d.id) })
+        .attr("dy", ".35em")
+        .attr("transform", function(d) { 
+          var x = (d.scale === "international") ? interval_lookup[d.type] : 0;
+          return "translate(" + (x + ((width * 0.3)/2)) + "," + ((scale(d.late_age) + scale(d.early_age))/2) + ")rotate(-90)"; })
+        .text(function(d) { return d.name; })
+        .call(drag)
+        .on("click", function(d) {
+          if (d3.event.defaultPrevented) return;
+          zoom.go(d);
+        })
+        .append("title").text(function(d) { return d.name + " (" + d.scale + ")" });
+      
+      currentX += (width/4);
+      adjust.labels.timescale();
+
+    }
+
+    var zoom = {
+      go: function(d) {
+          
+        if (d3.select("#n" + String(d.scale_id) + String(d.id) ).attr("data-zoomed") === "true") {
+          d3.selectAll(".interval_node").filter(function() {
+            if (d3.select(this).attr("data-zoomed") === "true") {
+              d3.select(this).attr("data-zoomed", "false");
+            }
+          });
+          zoom.out.go();
+        } else {
+          d3.selectAll(".interval_node").filter(function() {
+            if (d3.select(this).attr("data-zoomed") === "true") {
+              d3.select(this).attr("data-zoomed", "false");
+            }
+          });
+          d3.select("#n" + String(d.scale_id) + String(d.id) ).attr("data-zoomed", "true");
+
+          var scaleY = height/(scale(d3.select("#n" + String(d.scale_id) + String(d.id) ).data()[0].early_age) - scale(d3.select("#n" + String(d.scale_id) + String(d.id) ).data()[0].late_age)),
+              translate = scale(d3.select("#n" + String(d.scale_id) + String(d.id) ).data()[0].late_age) * scaleY;
+
+          zoom.inn.go(scaleY, translate);
+        }
+
+
+      },
+      
+      inn: {
+        go: function(scaleF, translate) {
+          // Indicate that we are zoomed in
+          d3.select("#timescale")
+            .attr("data-zoomed", "true");
+
+          this.timescale(scaleF, translate);
+
+        },
+
+        timescale: function(scaleF, translate) {
+          var x = 0;
+          d3.selectAll(".interval_node")
+            .transition()
+            .duration(1000)
+            .each(function(){ ++x; })
+            .attr("height", function(d) {
+              return (scale(d.early_age) - scale(d.late_age)) * scaleF;
+            })
+            .attr("y", function(d) {
+              return (scale(d.late_age) * scaleF) - translate;
+            });
+
+          setTimeout(adjust.labels.timescale, 1100);
+
+          var n = 0;
+          // Readjust the time interval labels
+          d3.selectAll(".interval_label")
+            .transition()
+            .duration(1000)
+            .each(function(){ ++n; })
+            .attr("transform", function(d) { 
+              var x = (d.scale === "international") ? interval_lookup[d.type] : 0;
+              return "translate(" + (x + ((width * 0.3)/2)) + "," + ((((scale(d.late_age) + scale(d.early_age))/2) * scaleF) - translate) + ")rotate(-90)"; })
+            .each("end", function() { if (!--n) { adjust.labels.timescale() }});
+        }
+      },
+
+      out: {
+        go: function() {
+          // Indicate that we are zoomed out
+          d3.select("#timescale")
+            .attr("data-zoomed", "false");
+          
+          this.timescale();
+        },
+
+        timescale: function() {
+          d3.selectAll(".interval_node")
+            .transition()
+            .duration(1000)
+            .attr("height", function(d) {
+              return scale(d.early_age) - scale(d.late_age);
+            })
+            .attr("y", function(d) {
+              return scale(d.late_age);
+            });
+
+          var n = 0;
+          // Reset the time interval labels
+          d3.selectAll(".interval_label")
+            .transition()
+            .duration(1000)
+            .each(function(){ ++n; })
+            .attr("transform", function(d) { 
+              var x = (d.scale === "international") ? interval_lookup[d.type] : 0;
+              return "translate(" + (x + ((width * 0.3)/2)) + "," + ((scale(d.late_age) + scale(d.early_age))/2) + ")rotate(-90)"; 
+            })
+            .each("end", function() { if (!--n) { adjust.labels.timescale() }});
+        }
+      }
+    }
+
+
+    var adjust = {
+
+      labels: {
+        timescale: function() {
+          d3.selectAll(".interval_label")
+            .style("display", "block");
+
+          d3.selectAll(".interval_label")
+            .style("display", function(d) {
+              var textWidth = d3.select("#nl" + String(d.scale_id) + String(d.id)).node().getBBox().width,
+                  boxWidth = parseFloat(d3.select("#n" + String(d.scale_id) + String(d.id)).attr("height") - 10);
+
+              if (textWidth > boxWidth) {
+                return "none";
+              } else {
+                return "block";
+              }
+            });
+        }
+      }
+    }
+
+    start();
+
+  </script>
+</body>
+</html>
+
